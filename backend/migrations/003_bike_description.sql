@@ -1,0 +1,1 @@
+﻿ALTER TABLE bikes ADD COLUMN IF NOT EXISTS description TEXT;

@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+dist/
+.vite/
+*.log
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Uploads (локальные файлы)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Vercel
+.vercel/
