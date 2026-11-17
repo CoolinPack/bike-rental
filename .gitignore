@@ -28,3 +28,9 @@ backend/uploads/*
 
 # Vercel
 .vercel/
+
+# Test/dev artifacts
+backend/body_*.json
+body_*.json
+apply_patch_*.py
+backend/uploads/*   
