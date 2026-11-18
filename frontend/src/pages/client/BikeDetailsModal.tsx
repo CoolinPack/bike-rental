@@ -3,7 +3,7 @@ import { BikeItem } from "../../types";
 import { BikeBookingModal } from "./BikeBookingModal";
 import { GalleryModal } from "../../components/GalleryModal";
 import { MediaViewer } from "../../components/MediaViewer";
-import { useDragScroll, useLockBodyScroll } from "../../components/useDragScroll";
+import { useLockBodyScroll } from "../../components/useDragScroll";
 
 interface Props {
   bike: BikeItem;

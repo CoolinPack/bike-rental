@@ -23,6 +23,7 @@ export interface BikeItem {
   engine_cc: number | null;
   daily_price: string;
   color: string | null;
+  description: string | null;
   mileage_km: number;
   status: "available" | "rented" | "maintenance";
   photos: string[];

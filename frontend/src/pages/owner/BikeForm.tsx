@@ -257,7 +257,6 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
     setDraggedIdx(null);
   }
 
-  const totalMedia = photos.length + videos.length;
 
   return (
     <div className="sheet-backdrop" onClick={onClose}>

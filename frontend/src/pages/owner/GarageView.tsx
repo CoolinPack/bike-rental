@@ -4,7 +4,7 @@ import { api } from "../../api/client";
 import { useAuth } from "../../store/auth";
 import { GalleryModal } from "../../components/GalleryModal";
 import { MediaViewer } from "../../components/MediaViewer";
-import { useDragScroll, useLockBodyScroll } from "../../components/useDragScroll";
+import { useLockBodyScroll } from "../../components/useDragScroll";
 
 interface Props {
   bike: BikeItem;

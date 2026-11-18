@@ -6,7 +6,7 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "https://ВАШ-БЭКЕНД-НА-RAILWAY.railway.app/$1"
+      "destination": "https://твой-render-url.onrender.com/$1"
     },
     {
       "source": "/(.*)",

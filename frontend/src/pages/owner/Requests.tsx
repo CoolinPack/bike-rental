@@ -22,11 +22,7 @@ interface OwnerBookingItem {
 
 type Tab = "pending" | "active" | "completed";
 
-const TAB_LABEL: Record<Tab, string> = {
-  pending: "Ожидают",
-  active: "Активные",
-  completed: "Завершённые",
-};
+
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "Ожидает",

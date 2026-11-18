@@ -152,13 +152,13 @@ export function ClientCatalogPage() {
   );
 }
 
-function BikeCard({ bike, onClick }: { bike: BikeItem; onClick: () => void }) {
+function BikeCard({ bike, onClick }: { bike: BikeItem; onClick: (e: React.MouseEvent) => void }) {
   const status = bike.status as Status;
   const licenseRequired = (bike.engine_cc ?? 0) > 50;
   const photo = bike.photos[0];
 
   return (
-    <div className="bike-card" onClick={onClick}>
+    <div className="bike-card" onClick={(e) => onClick(e)}>
       {photo ? (
         <img
           className="bike-card-image"

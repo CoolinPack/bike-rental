@@ -152,13 +152,13 @@ function OwnerBikeCard({
   onClick,
 }: {
   bike: BikeItem;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
 }) {
   const status = bike.status as Status;
   const photo = bike.photos[0];
 
   return (
-    <div className="bike-card" onClick={onClick}>
+    <div className="bike-card" onClick={(e) => onClick(e)}>
       {photo ? (
         <img
           className="bike-card-image"
