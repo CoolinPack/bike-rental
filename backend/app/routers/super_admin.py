@@ -19,6 +19,9 @@ from app.models.schemas import (
     SuperAdminSummary,
 )
 from app.security import UserContext, require_super_admin
+from app.bot.bot import configure_park_bot, remove_park_bot
+from app.config import settings
+from aiogram.exceptions import TelegramAPIError
 from app.services import parks as parks_service
 
 router = APIRouter(prefix="/super", tags=["super_admin"])
@@ -61,10 +64,30 @@ async def create_park(
 ):
     if data.subscription_months not in (1, 3):
         raise HTTPException(400, "subscription_months must be 1 or 3")
+    # Сначала проверяем токен, чтобы не сохранить нерабочего бота.
+    if data.bot_token:
+        try:
+            from aiogram import Bot
+            check_bot = Bot(token=data.bot_token)
+            try:
+                await check_bot.get_me()
+            finally:
+                await check_bot.session.close()
+        except Exception as e:
+            raise HTTPException(400, f"Telegram bot token is invalid: {e}")
     try:
         park_id = await parks_service.create_park(db, data)
     except asyncpg.UniqueViolationError:
         raise HTTPException(409, "Park with this owner_telegram_id already exists")
+    if data.bot_token:
+        try:
+            await configure_park_bot(
+                park_id, data.bot_token,
+                settings.webhook_url if settings.use_webhook and settings.webhook_url else None,
+            )
+        except Exception as e:
+            await db.execute("UPDATE parks SET bot_token = NULL WHERE id = $1", park_id)
+            raise HTTPException(502, f"Park saved, but Telegram bot setup failed: {e}")
     return {"id": park_id}
 
 
@@ -90,7 +113,25 @@ async def update_park(
     park = await parks_service.get_park(db, park_id)
     if not park:
         raise HTTPException(404, "Park not found")
+    if data.bot_token:
+        try:
+            from aiogram import Bot
+            check_bot = Bot(token=data.bot_token)
+            try:
+                await check_bot.get_me()
+            finally:
+                await check_bot.session.close()
+        except Exception as e:
+            raise HTTPException(400, f"Telegram bot token is invalid: {e}")
     await parks_service.update_park(db, park_id, data)
+    if data.bot_token:
+        try:
+            await configure_park_bot(
+                park_id, data.bot_token,
+                settings.webhook_url if settings.use_webhook and settings.webhook_url else None,
+            )
+        except Exception as e:
+            raise HTTPException(502, f"Park updated, but Telegram bot setup failed: {e}")
     return {"ok": True}
 
 
@@ -103,6 +144,7 @@ async def delete_park(
     park = await parks_service.get_park(db, park_id)
     if not park:
         raise HTTPException(404, "Park not found")
+    await remove_park_bot(park_id)
     await parks_service.delete_park(db, park_id)
 
 

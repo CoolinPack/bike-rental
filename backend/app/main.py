@@ -3,7 +3,6 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from aiogram.types import Update
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -12,8 +11,9 @@ from app.bot.bot import (
     delete_webhook,
     get_bot,
     get_dispatcher,
-    setup_webhook,
     shutdown_bot,
+    configure_park_bot,
+    feed_park_update,
 )
 from app.bot.reminders import reminder_worker
 from app.config import settings
@@ -31,15 +31,26 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     await init_pool()
 
-    # Бот
+    # Подключаем отдельные Telegram-боты всех парков, у которых сохранён токен.
     if settings.use_webhook and settings.webhook_url:
-        await setup_webhook(settings.webhook_url)
-        logger.info("Webhook set to %s", settings.webhook_url)
-    else:
+        from app.database import get_pool
+        async with get_pool().acquire() as conn:
+            park_bots = await conn.fetch(
+                "SELECT id, bot_token FROM parks WHERE bot_token IS NOT NULL AND bot_token <> '' AND is_active = TRUE"
+            )
+        for park in park_bots:
+            try:
+                await configure_park_bot(int(park["id"]), park["bot_token"], settings.webhook_url)
+                logger.info("Tenant bot webhook configured for park %s", park["id"])
+            except Exception:
+                logger.exception("Failed to configure Telegram bot for park %s", park["id"])
+
+    # Старый общий бот оставлен для обратной совместимости.
+    if not settings.use_webhook:
         try:
             await delete_webhook()
         except Exception:
-            logger.exception("Failed to delete webhook (ok if none existed)")
+            logger.exception("Failed to delete legacy webhook")
 
     # Фоновые напоминания
     reminder_task = asyncio.create_task(reminder_worker())
@@ -76,9 +87,24 @@ uploads_path.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=uploads_path), name="uploads")
 
 
+@app.post("/tg/webhook/{park_id}")
+async def tg_park_webhook(park_id: int, request: Request):
+    """Webhook отдельного Telegram-бота арендатора."""
+    from app.database import get_pool
+    async with get_pool().acquire() as conn:
+        token = await conn.fetchval(
+            "SELECT bot_token FROM parks WHERE id = $1 AND is_active = TRUE", park_id
+        )
+    if not token:
+        return {"ok": False, "detail": "Park bot not configured"}
+    await feed_park_update(park_id, token, await request.json())
+    return {"ok": True}
+
+
 @app.post("/tg/webhook")
-async def tg_webhook(request: Request):
-    """Вебхук Telegram. Используется только при USE_WEBHOOK=true."""
+async def tg_webhook_legacy(request: Request):
+    """Webhook общего платформенного бота (совместимость со старой конфигурацией)."""
+    from aiogram.types import Update
     data = await request.json()
     update = Update.model_validate(data, context={"bot": get_bot()})
     await get_dispatcher().feed_update(get_bot(), update)

@@ -79,7 +79,32 @@ async def get_current_user(
             detail="Missing X-Init-Data header",
         )
 
-    params = _validate_init_data(init_data, settings.bot_token)
+    # Для Mini App арендатора подпись проверяется токеном именно его бота.
+    # Telegram передаёт start_param, если ссылка содержит ?startapp=park_ID.
+    raw_params = dict(parse_qsl(init_data, keep_blank_values=True))
+    tenant_park_id = None
+    tenant_start_param = raw_params.get("start_param") or request.query_params.get("startapp")
+    if tenant_start_param and tenant_start_param.startswith("park_"):
+        try:
+            tenant_park_id = int(tenant_start_param.removeprefix("park_"))
+        except ValueError:
+            tenant_park_id = None
+    if tenant_park_id is None:
+        try:
+            tenant_park_id = int(request.query_params.get("park_id", "")) or None
+        except ValueError:
+            tenant_park_id = None
+
+    auth_token = settings.bot_token
+    if tenant_park_id is not None:
+        tenant_token = await db.fetchval(
+            "SELECT bot_token FROM parks WHERE id = $1 AND is_active = TRUE",
+            tenant_park_id,
+        )
+        if tenant_token:
+            auth_token = tenant_token
+
+    params = _validate_init_data(init_data, auth_token)
     if params is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -158,10 +183,15 @@ async def get_current_user(
 
     # Клиент. Парк берём из start_param (?startapp=park_5) или query.
     park_id = None
-    start_param = params.get("start_param")
+    start_param = params.get("start_param") or request.query_params.get("startapp")
     if start_param and start_param.startswith("park_"):
         try:
             park_id = int(start_param.removeprefix("park_"))
+        except ValueError:
+            park_id = None
+    if park_id is None:
+        try:
+            park_id = int(request.query_params.get("park_id", "")) or None
         except ValueError:
             park_id = None
 
