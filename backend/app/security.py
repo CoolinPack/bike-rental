@@ -155,7 +155,11 @@ async def get_current_user(
     await _upsert_user(db, user)
 
     # Супер-админ: режим из X-Mode (по умолчанию super_admin)
-    if is_super_admin:
+    # Если initData подтверждён токеном конкретного tenant-бота,
+    # сначала применяем роль внутри этого парка. Один Telegram ID может
+    # одновременно быть супер-админом платформы и владельцем парка.
+    # Супер-админка доступна только при входе через главный бот.
+    if is_super_admin and verified_park_id is None:
         mode: Role = "super_admin"
         if x_mode in ("client", "owner", "super_admin"):
             mode = x_mode  # type: ignore[assignment]
