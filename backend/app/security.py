@@ -79,32 +79,55 @@ async def get_current_user(
             detail="Missing X-Init-Data header",
         )
 
-    # Для Mini App арендатора подпись проверяется токеном именно его бота.
-    # Telegram передаёт start_param, если ссылка содержит ?startapp=park_ID.
+    # WebApp initData подписывается токеном того бота, который открыл Mini App.
+    # Для tenant-ботов проверяем токен соответствующего парка, а не только
+    # глобальный токен супер-админа. Если park_id/start_param отсутствует
+    # (например, приложение открыто через Menu Button), перебираем активные
+    # tenant-токены и определяем парк по успешно проверенной подписи.
     raw_params = dict(parse_qsl(init_data, keep_blank_values=True))
-    tenant_park_id = None
-    tenant_start_param = raw_params.get("start_param") or request.query_params.get("startapp")
-    if tenant_start_param and tenant_start_param.startswith("park_"):
+    start_param = raw_params.get("start_param") or request.query_params.get("startapp")
+    requested_park_id: int | None = None
+    if start_param and start_param.startswith("park_"):
         try:
-            tenant_park_id = int(tenant_start_param.removeprefix("park_"))
+            requested_park_id = int(start_param.removeprefix("park_"))
         except ValueError:
-            tenant_park_id = None
-    if tenant_park_id is None:
+            requested_park_id = None
+    if requested_park_id is None:
         try:
-            tenant_park_id = int(request.query_params.get("park_id", "")) or None
+            requested_park_id = int(request.query_params.get("park_id", "")) or None
         except ValueError:
-            tenant_park_id = None
+            requested_park_id = None
 
-    auth_token = settings.bot_token
-    if tenant_park_id is not None:
-        tenant_token = await db.fetchval(
-            "SELECT bot_token FROM parks WHERE id = $1 AND is_active = TRUE",
-            tenant_park_id,
+    params = None
+    verified_park_id: int | None = None
+
+    if requested_park_id is not None:
+        park_auth = await db.fetchrow(
+            "SELECT id, bot_token FROM parks WHERE id = $1 AND is_active = TRUE",
+            requested_park_id,
         )
-        if tenant_token:
-            auth_token = tenant_token
+        if park_auth and park_auth["bot_token"]:
+            params = _validate_init_data(init_data, park_auth["bot_token"])
+            if params is not None:
+                verified_park_id = int(park_auth["id"])
+    else:
+        # Menu Button часто открывает URL без start_param/park_id.
+        # В таком случае парк надёжно определяется проверкой подписи.
+        park_tokens = await db.fetch(
+            "SELECT id, bot_token FROM parks WHERE is_active = TRUE AND bot_token IS NOT NULL"
+        )
+        for park_auth in park_tokens:
+            candidate = _validate_init_data(init_data, park_auth["bot_token"])
+            if candidate is not None:
+                params = candidate
+                verified_park_id = int(park_auth["id"])
+                break
 
-    params = _validate_init_data(init_data, auth_token)
+    # Сохраняем совместимость с главным ботом. Если явно указан park_id,
+    # но его токен не подтвердил подпись, не принимаем данные главным токеном.
+    if params is None and requested_park_id is None:
+        params = _validate_init_data(init_data, settings.bot_token)
+
     if params is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -169,9 +192,18 @@ async def get_current_user(
         )
 
     # Обычный пользователь: ищем, владелец ли он парка
-    park_row = await db.fetchrow(
-        "SELECT id FROM parks WHERE owner_telegram_id = $1", telegram_id
-    )
+    park_row = None
+    if verified_park_id is not None:
+        park_row = await db.fetchrow(
+            "SELECT id FROM parks WHERE id = $1 AND owner_telegram_id = $2 AND is_active = TRUE",
+            verified_park_id,
+            telegram_id,
+        )
+    if park_row is None and verified_park_id is None:
+        park_row = await db.fetchrow(
+            "SELECT id FROM parks WHERE owner_telegram_id = $1 AND is_active = TRUE",
+            telegram_id,
+        )
     if park_row:
         return UserContext(
             telegram_id=telegram_id,
@@ -182,9 +214,9 @@ async def get_current_user(
         )
 
     # Клиент. Парк берём из start_param (?startapp=park_5) или query.
-    park_id = None
+    park_id = verified_park_id
     start_param = params.get("start_param") or request.query_params.get("startapp")
-    if start_param and start_param.startswith("park_"):
+    if park_id is None and start_param and start_param.startswith("park_"):
         try:
             park_id = int(start_param.removeprefix("park_"))
         except ValueError:
