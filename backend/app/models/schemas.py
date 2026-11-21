@@ -44,6 +44,7 @@ class ParkCreate(BaseModel):
 
 class ParkUpdate(BaseModel):
     name: str | None = None
+    owner_telegram_id: int | None = None
     bot_token: str | None = None
     subscription_plan: Literal["start", "pro"] | None = None
     custom_price_usd: Decimal | None = None
@@ -65,6 +66,7 @@ class ParkItem(BaseModel):
     bikes_count: int
     bookings_count: int
     revenue_usd: Decimal
+    bot_token_configured: bool = False
 
 
 class ParkListResponse(BaseModel):

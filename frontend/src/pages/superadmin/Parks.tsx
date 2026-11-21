@@ -15,6 +15,7 @@ interface ParkItem {
   bikes_count: number;
   bookings_count: number;
   revenue_usd: string;
+  bot_token_configured: boolean;
 }
 
 const PLAN_LABEL: Record<string, string> = {
@@ -165,6 +166,10 @@ function ParkCard({ park, onClick }: { park: ParkItem; onClick: () => void }) {
         <span>Броней: {park.bookings_count}</span>
       </div>
 
+      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+        Telegram-бот: {park.bot_token_configured ? "токен сохранён" : "не подключён"}
+      </div>
+
       {park.subscription_expires_at && (
         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
           Подписка до {formatDate(park.subscription_expires_at)}
@@ -206,11 +211,13 @@ function ParkCreateModal({
   async function submit() {
     setError(null);
     if (!form.name.trim()) return setError("Введите название парка");
-    if (!form.owner_telegram_id.trim())
-      return setError("Введите Telegram ID владельца");
+    if (!form.owner_telegram_id.trim() || !/^\d+$/.test(form.owner_telegram_id.trim()))
+      return setError("Введите корректный Telegram ID владельца");
+    if (!form.bot_token.trim())
+      return setError("Введите токен Telegram-бота парка");
     setSubmitting(true);
     try {
-      await api.post("/super/parks", {
+      const result = await api.post<{ id: number; bot_configured: boolean; warning?: string | null }>("/super/parks", {
         name: form.name.trim(),
         owner_telegram_id: Number(form.owner_telegram_id),
         bot_token: form.bot_token.trim() || null,
@@ -223,6 +230,9 @@ function ParkCreateModal({
           ? Number(form.discount_percent)
           : 0,
       });
+      if (result.warning) {
+        window.alert(`Парк создан, но Telegram-бот пока не подключён: ${result.warning}. Токен сохранён; повторите подключение через редактирование парка.`);
+      }
       onCreated();
     } catch (e: any) {
       setError(e.message || "Не удалось создать");
@@ -258,10 +268,12 @@ function ParkCreateModal({
           style={{ marginBottom: 10 }}
         />
 
-        <label className="label">Bot token (опционально)</label>
+        <label className="label">Токен Telegram-бота</label>
         <input
           className="input"
           placeholder="123456:ABC..."
+          type="password"
+          autoComplete="new-password"
           value={form.bot_token}
           onChange={(e) => setForm({ ...form, bot_token: e.target.value })}
           style={{ marginBottom: 10 }}
@@ -359,6 +371,8 @@ function ParkFormModal({
   onSaved: () => void;
 }) {
   const [name, setName] = useState(park.name);
+  const [ownerTelegramId, setOwnerTelegramId] = useState(String(park.owner_telegram_id));
+  const [botToken, setBotToken] = useState("");
   const [customPrice, setCustomPrice] = useState(park.custom_price_usd ?? "");
   const [discount, setDiscount] = useState(park.discount_percent ?? "0");
   const [isActive, setIsActive] = useState(park.is_active);
@@ -371,13 +385,27 @@ function ParkFormModal({
     setSuccessMsg(null);
     setSubmitting(true);
     try {
-      await api.patch(`/super/parks/${park.id}`, {
+      if (!name.trim()) throw new Error("Введите название парка");
+      if (!ownerTelegramId.trim() || !/^\d+$/.test(ownerTelegramId.trim())) {
+        throw new Error("Введите корректный Telegram ID владельца");
+      }
+      const payload: Record<string, unknown> = {
         name: name.trim(),
+        owner_telegram_id: Number(ownerTelegramId),
         custom_price_usd: customPrice === "" ? null : Number(customPrice),
         discount_percent: Number(discount),
         is_active: isActive,
-      });
-      setSuccessMsg("Сохранено");
+      };
+      if (botToken.trim()) payload.bot_token = botToken.trim();
+      const result = await api.patch<{ bot_configured?: boolean; warning?: string | null }>(
+        `/super/parks/${park.id}`,
+        payload,
+      );
+      if (result.warning) {
+        setError(`Данные сохранены, но бот пока не подключён: ${result.warning}`);
+        return;
+      }
+      setSuccessMsg(botToken.trim() ? "Данные сохранены, Telegram-бот подключён" : "Сохранено");
       onSaved();
     } catch (e: any) {
       setError(e.message || "Не удалось сохранить");
@@ -428,7 +456,7 @@ function ParkFormModal({
   async function remove() {
     if (
       !confirm(
-        `Удалить парк "${park.name}"? Все байки и брони будут удалены.`,
+        `Полностью удалить парк "${park.name}"? Будут удалены его Telegram-привязка, байки, брони, расходы, точки карты и заявки на оплату. Это действие необратимо.`,
       )
     )
       return;
@@ -554,6 +582,29 @@ function ParkFormModal({
           onChange={(e) => setName(e.target.value)}
           style={{ marginBottom: 10 }}
         />
+
+        <label className="label">Telegram ID владельца</label>
+        <input
+          className="input"
+          type="number"
+          value={ownerTelegramId}
+          onChange={(e) => setOwnerTelegramId(e.target.value)}
+          style={{ marginBottom: 10 }}
+        />
+
+        <label className="label">Новый токен Telegram-бота</label>
+        <input
+          className="input"
+          type="password"
+          autoComplete="new-password"
+          placeholder={park.bot_token_configured ? "Оставьте пустым, чтобы не менять" : "Вставьте токен бота"}
+          value={botToken}
+          onChange={(e) => setBotToken(e.target.value)}
+          style={{ marginBottom: 6 }}
+        />
+        <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+          Сейчас: {park.bot_token_configured ? "токен сохранён; для замены вставьте новый" : "токен не подключён"}. Сам токен никогда не показывается.
+        </div>
 
         <label className="label">Индивидуальная цена, $</label>
         <input

@@ -60,7 +60,7 @@ async def update_park(conn: asyncpg.Connection, park_id: int, data: ParkUpdate) 
     args: list = []
     idx = 1
 
-    for field in ("name", "bot_token", "subscription_plan",
+    for field in ("name", "owner_telegram_id", "bot_token", "subscription_plan",
                   "custom_price_usd", "discount_percent", "is_active"):
         value = getattr(data, field)
         if value is not None:
@@ -88,6 +88,7 @@ async def list_parks(conn: asyncpg.Connection) -> list[dict]:
             p.id, p.name, p.owner_telegram_id, p.subscription_plan,
             p.subscription_expires_at, p.custom_price_usd, p.discount_percent,
             p.referred_by_park_id, p.is_active, p.created_at, p.bikes_limit,
+            (p.bot_token IS NOT NULL AND p.bot_token <> '') AS bot_token_configured,
             COALESCE(b.bikes_count, 0) AS bikes_count,
             COALESCE(bk.bookings_count, 0) AS bookings_count,
             COALESCE(bk.revenue_usd, 0) AS revenue_usd
