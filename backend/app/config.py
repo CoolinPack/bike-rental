@@ -1,3 +1,4 @@
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +18,28 @@ class Settings(BaseSettings):
 
     use_webhook: bool = False
     webhook_url: str | None = None
+
+    # Cloudinary configuration
+    cloudinary_cloud_name: str | None = None
+    cloudinary_api_key: str | None = None
+    cloudinary_api_secret: str | None = None
+
+    @property
+    def cloudinary_enabled(self) -> bool:
+        return bool(
+            self.cloudinary_cloud_name
+            and self.cloudinary_api_key
+            and self.cloudinary_api_secret
+        )
+
+    @property
+    def cloudinary_partially_configured(self) -> bool:
+        configured = (
+            self.cloudinary_cloud_name,
+            self.cloudinary_api_key,
+            self.cloudinary_api_secret,
+        )
+        return any(configured) and not all(configured)
 
     @property
     def cors_origins_list(self) -> list[str]:
