@@ -113,6 +113,10 @@ class BikeCreate(BaseModel):
     model: str
     engine_cc: int | None = None
     daily_price: Decimal
+    price_3_days: Decimal | None = None
+    price_7_days: Decimal | None = None
+    price_14_days: Decimal | None = None
+    price_30_days: Decimal | None = None
     color: str | None = None
     description: str | None = None
     mileage_km: int = 0
@@ -124,6 +128,10 @@ class BikeUpdate(BaseModel):
     model: str | None = None
     engine_cc: int | None = None
     daily_price: Decimal | None = None
+    price_3_days: Decimal | None = None
+    price_7_days: Decimal | None = None
+    price_14_days: Decimal | None = None
+    price_30_days: Decimal | None = None
     color: str | None = None
     description: str | None = None
     mileage_km: int | None = None
@@ -137,10 +145,15 @@ class BikeItem(BaseModel):
     model: str
     engine_cc: int | None
     daily_price: Decimal
+    price_3_days: Decimal | None = None
+    price_7_days: Decimal | None = None
+    price_14_days: Decimal | None = None
+    price_30_days: Decimal | None = None
     color: str | None
     description: str | None
     mileage_km: int
     status: str
+    rented_until: date | None = None
     photos: list[str]
     videos: list[str]
     created_at: datetime
@@ -188,10 +201,15 @@ class ClientBikeItem(BaseModel):
     model: str
     engine_cc: int | None
     daily_price: Decimal
+    price_3_days: Decimal | None = None
+    price_7_days: Decimal | None = None
+    price_14_days: Decimal | None = None
+    price_30_days: Decimal | None = None
     color: str | None
     description: str | None
     mileage_km: int
     status: str
+    rented_until: date | None = None
     photos: list[str]
     videos: list[str]
     license_required: bool
@@ -234,6 +252,8 @@ class BookingItem(BaseModel):
     start_date: date
     end_date: date
     total_price: Decimal
+    original_total_price: Decimal | None = None
+    extension_total_price: Decimal = Decimal("0")
     status: str
     created_at: datetime
     client_name: str | None = None
@@ -260,6 +280,10 @@ class OwnerBookingListResponse(BaseModel):
 
 class BookingRejectRequest(BaseModel):
     reason: str | None = None
+
+
+class BookingExtendRequest(BaseModel):
+    new_end_date: date
 
 # ============ OWNER ANALYTICS ============
 

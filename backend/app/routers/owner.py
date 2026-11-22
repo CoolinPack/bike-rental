@@ -25,6 +25,7 @@ from app.models.schemas import (
     BikeListResponse,
     BikeUpdate,
     BookingRejectRequest,
+    BookingExtendRequest,
     CategoryAnalyticsItem,
     CategoryAnalyticsListResponse,
     ExpenseCreate,
@@ -58,10 +59,15 @@ def _bike_item(r: dict) -> BikeItem:
         model=r["model"],
         engine_cc=r["engine_cc"],
         daily_price=r["daily_price"],
+        price_3_days=r.get("price_3_days"),
+        price_7_days=r.get("price_7_days"),
+        price_14_days=r.get("price_14_days"),
+        price_30_days=r.get("price_30_days"),
         color=r["color"],
         description=r["description"],
         mileage_km=r["mileage_km"],
         status=r["status"],
+        rented_until=r.get("rented_until"),
         photos=list(r["photos"] or []),
         videos=list(r["videos"] or []),
         created_at=r["created_at"],
@@ -79,6 +85,8 @@ def _owner_booking_item(r: dict) -> OwnerBookingItem:
         start_date=r["start_date"],
         end_date=r["end_date"],
         total_price=r["total_price"],
+        original_total_price=r.get("original_total_price") or r["total_price"],
+        extension_total_price=r.get("extension_total_price") or 0,
         status=r["status"],
         created_at=r["created_at"],
         client_name=r.get("client_name"),
@@ -107,6 +115,10 @@ async def create_bike(
     model: str = Form(...),
     engine_cc: int | None = Form(default=None),
     daily_price: str = Form(...),
+    price_3_days: str | None = Form(default=None),
+    price_7_days: str | None = Form(default=None),
+    price_14_days: str | None = Form(default=None),
+    price_30_days: str | None = Form(default=None),
     color: str | None = Form(default=None),
     description: str | None = Form(default=None),
     mileage_km: int = Form(default=0),
@@ -142,6 +154,10 @@ async def create_bike(
             model=model,
             engine_cc=engine_cc,
             daily_price=price,
+            price_3_days=Decimal(price_3_days) if price_3_days else None,
+            price_7_days=Decimal(price_7_days) if price_7_days else None,
+            price_14_days=Decimal(price_14_days) if price_14_days else None,
+            price_30_days=Decimal(price_30_days) if price_30_days else None,
             color=color,
             description=description,
             mileage_km=mileage_km,
@@ -150,7 +166,7 @@ async def create_bike(
         bike_id = await bikes_service.create_bike(
             db, _park(ctx), data, photo_urls, video_urls
         )
-    except (ValueError, PermissionError) as e:
+    except (ValueError, PermissionError, InvalidOperation) as e:
         for url in photo_urls + video_urls:
             files_service.delete_upload(url)
         raise HTTPException(400, str(e))
@@ -505,3 +521,21 @@ async def reorder_photos(
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"photos": photos}
+
+
+@router.post("/requests/{booking_id}/extend")
+async def extend_rental(
+    booking_id: int,
+    data: BookingExtendRequest,
+    ctx: UserContext = Depends(require_owner),
+    db: asyncpg.Connection = Depends(get_db),
+):
+    try:
+        result = await bookings_service.extend_booking(
+            db, _park(ctx), booking_id, data.new_end_date
+        )
+    except PermissionError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return result

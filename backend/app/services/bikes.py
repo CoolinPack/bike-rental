@@ -49,8 +49,9 @@ async def create_bike(
         """
         INSERT INTO bikes (
             park_id, plate_number, model, engine_cc, daily_price,
+            price_3_days, price_7_days, price_14_days, price_30_days,
             color, description, mileage_km, status, photos, videos
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
         RETURNING id
         """,
         park_id,
@@ -58,6 +59,10 @@ async def create_bike(
         data.model,
         data.engine_cc,
         data.daily_price,
+        data.price_3_days,
+        data.price_7_days,
+        data.price_14_days,
+        data.price_30_days,
         data.color,
         data.description,
         data.mileage_km,
@@ -73,12 +78,22 @@ async def list_bikes(
 ) -> list[dict]:
     if status_filter:
         rows = await conn.fetch(
-            "SELECT * FROM bikes WHERE park_id = $1 AND status = $2 ORDER BY id DESC",
+            """SELECT b.*,
+               (SELECT MAX(end_date) FROM bookings bk
+                WHERE bk.bike_id=b.id AND bk.park_id=b.park_id AND bk.status='active'
+                  AND bk.start_date <= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+                  AND bk.end_date >= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date) AS rented_until
+               FROM bikes b WHERE b.park_id = $1 AND b.status = $2 ORDER BY b.id DESC""",
             park_id, status_filter,
         )
     else:
         rows = await conn.fetch(
-            "SELECT * FROM bikes WHERE park_id = $1 ORDER BY id DESC", park_id
+            """SELECT b.*,
+               (SELECT MAX(end_date) FROM bookings bk
+                WHERE bk.bike_id=b.id AND bk.park_id=b.park_id AND bk.status='active'
+                  AND bk.start_date <= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+                  AND bk.end_date >= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date) AS rented_until
+               FROM bikes b WHERE b.park_id = $1 ORDER BY b.id DESC""", park_id
         )
     return [dict(r) for r in rows]
 
@@ -135,7 +150,12 @@ async def client_catalog(
 
     query = (
         "SELECT id, park_id, plate_number, model, engine_cc, daily_price, "
-        "color, description, mileage_km, status, photos, videos, created_at "
+        "price_3_days, price_7_days, price_14_days, price_30_days, "
+        "color, description, mileage_km, status, photos, videos, created_at, "
+        "(SELECT MAX(end_date) FROM bookings bk WHERE bk.bike_id=bikes.id "
+        "AND bk.park_id=bikes.park_id AND bk.status='active' "
+        "AND bk.start_date <= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date "
+        "AND bk.end_date >= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date) AS rented_until "
         "FROM bikes WHERE "
         + " AND ".join(where)
         + " ORDER BY (status = 'available') DESC, id DESC"
@@ -156,10 +176,13 @@ async def update_bike(
     fields = []
     args: list = []
     idx = 1
+    provided = getattr(data, "model_fields_set", getattr(data, "__fields_set__", set()))
+    tier_fields = {"price_3_days", "price_7_days", "price_14_days", "price_30_days"}
     for field in ("plate_number", "model", "engine_cc", "daily_price",
+                  "price_3_days", "price_7_days", "price_14_days", "price_30_days",
                   "color", "description", "mileage_km", "status"):
         value = getattr(data, field)
-        if value is not None:
+        if value is not None or (field in tier_fields and field in provided):
             fields.append(f"{field} = ${idx}")
             args.append(value)
             idx += 1
