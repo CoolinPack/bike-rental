@@ -70,6 +70,14 @@ export function BikeDetailsModal({ bike, onClose, onCreated }: Props) {
             {bike.plate_number}
           </div>
 
+          {bike.status === "rented" && bike.rented_until && (
+            <div className="card" style={{ marginBottom: 12 }}>
+              <div style={{ fontWeight: 600 }}>Сейчас в аренде</div>
+              <div className="muted" style={{ fontSize: 13 }}>
+                Возврат ожидается: {formatDate(bike.rented_until)}
+              </div>
+            </div>
+          )}
           <div className="card col" style={{ gap: 8, marginBottom: 16 }}>
             <InfoRow
               label="Цена"
@@ -170,4 +178,10 @@ function formatMoney(v: string | number): string {
   const n = Number(v);
   if (isNaN(n)) return "0 VND";
   return n.toLocaleString("ru-RU") + " VND";
+}
+
+function formatDate(d: string): string {
+  return new Date(d + "T00:00:00").toLocaleDateString("ru-RU", {
+    day: "2-digit", month: "long", year: "numeric",
+  });
 }

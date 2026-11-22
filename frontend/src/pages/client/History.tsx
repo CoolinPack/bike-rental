@@ -203,8 +203,16 @@ function BookingCard({
             {formatDate(booking.start_date)} — {formatDate(booking.end_date)}
           </div>
           <div style={{ fontWeight: 700, fontSize: 15, marginTop: 6 }}>
-            {formatMoney(booking.total_price)}
+            Всего: {formatMoney(booking.total_price)}
           </div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            Основной период: {formatMoney(booking.original_total_price ?? booking.total_price)}
+          </div>
+          {(Number(booking.extension_total_price ?? 0) > 0) && (
+            <div className="muted" style={{ fontSize: 12 }}>
+              Продление: {formatMoney(booking.extension_total_price ?? 0)}
+            </div>
+          )}
         </div>
       </div>
 

@@ -11,6 +11,8 @@ interface OwnerBookingItem {
   start_date: string;
   end_date: string;
   total_price: string;
+  original_total_price?: string | null;
+  extension_total_price?: string;
   status: "pending" | "active" | "completed" | "cancelled" | "rejected";
   created_at: string;
   client_name: string | null;
@@ -88,6 +90,32 @@ export function OwnerRequestsPage() {
       setSelected(null);
     } catch (e: any) {
       setError(e.message || "Не удалось завершить");
+    } finally {
+      setActing(null);
+    }
+  }
+
+  async function extend(id: number, currentEnd: string) {
+    const nextEnd = window.prompt(
+      "Введите новую дату окончания аренды (ГГГГ-ММ-ДД)",
+      currentEnd
+    );
+    if (!nextEnd) return;
+    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(nextEnd)) {
+      setError("Введите дату в формате ГГГГ-ММ-ДД");
+      return;
+    }
+    setActing(id);
+    try {
+      const result = await api.post<{ extension_amount: string }>(
+        `/owner/requests/${id}/extend`,
+        { new_end_date: nextEnd }
+      );
+      alert("Продление сохранено. Стоимость продления: " + formatMoney(result.extension_amount));
+      reload();
+      setSelected(null);
+    } catch (e: any) {
+      setError(e.message || "Не удалось продлить аренду");
     } finally {
       setActing(null);
     }
@@ -174,6 +202,7 @@ export function OwnerRequestsPage() {
           onAccept={() => accept(selected.id)}
           onReject={(reason) => reject(selected.id, reason)}
           onComplete={() => complete(selected.id)}
+          onExtend={() => extend(selected.id, selected.end_date)}
         />
       )}
     </div>
@@ -255,6 +284,7 @@ function DetailsModal({
   onAccept,
   onReject,
   onComplete,
+  onExtend,
 }: {
   booking: OwnerBookingItem;
   tab: Tab;
@@ -263,6 +293,7 @@ function DetailsModal({
   onAccept: () => void;
   onReject: (reason: string) => void;
   onComplete: () => void;
+  onExtend: () => void;
 }) {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reason, setReason] = useState("");
@@ -317,7 +348,13 @@ function DetailsModal({
               {formatDate(booking.start_date)} → {formatDate(booking.end_date)}
             </div>
             <div style={{ fontWeight: 700, marginTop: 4 }}>
-              {formatMoney(booking.total_price)}
+              Всего: {formatMoney(booking.total_price)}
+            </div>
+            <div className="muted" style={{ fontSize: 12 }}>
+              Основной период: {formatMoney(booking.original_total_price ?? booking.total_price)}
+            </div>
+            <div className="muted" style={{ fontSize: 12 }}>
+              Продления: {formatMoney(booking.extension_total_price ?? "0")}
             </div>
           </div>
         </div>
@@ -401,6 +438,10 @@ function DetailsModal({
         )}
 
         {tab === "active" && (
+          <>
+          <button className="btn btn-secondary" onClick={onExtend} disabled={acting} style={{ width: "100%", marginBottom: 8 }}>
+            Продлить аренду
+          </button>
           <button
             className="btn"
             onClick={onComplete}
@@ -409,6 +450,7 @@ function DetailsModal({
           >
             {acting ? "…" : "Завершить аренду"}
           </button>
+          </>
         )}
 
         <button

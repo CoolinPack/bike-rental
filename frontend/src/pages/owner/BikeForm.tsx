@@ -24,6 +24,10 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
       : ""
   );
   const [dailyPrice, setDailyPrice] = useState(bike?.daily_price ?? "");
+  const [price3, setPrice3] = useState(bike?.price_3_days ?? "");
+  const [price7, setPrice7] = useState(bike?.price_7_days ?? "");
+  const [price14, setPrice14] = useState(bike?.price_14_days ?? "");
+  const [price30, setPrice30] = useState(bike?.price_30_days ?? "");
   const [color, setColor] = useState(bike?.color ?? "");
   const [description, setDescription] = useState(bike?.description ?? "");
   const [mileage, setMileage] = useState(
@@ -62,40 +66,27 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
       fd.append("model", model.trim());
       if (engineCc.trim()) fd.append("engine_cc", engineCc.trim());
       fd.append("daily_price", dailyPrice.trim());
+      if (price3.trim()) fd.append("price_3_days", price3.trim());
+      if (price7.trim()) fd.append("price_7_days", price7.trim());
+      if (price14.trim()) fd.append("price_14_days", price14.trim());
+      if (price30.trim()) fd.append("price_30_days", price30.trim());
       if (color.trim()) fd.append("color", color.trim());
       if (description.trim()) fd.append("description", description.trim());
       fd.append("mileage_km", mileage.trim() || "0");
       fd.append("status", status);
 
       if (mode === "create") {
-        const res = await api.upload<{ id: number }>(
+        photos.forEach((p) => {
+          if (p instanceof File) fd.append("photos", p);
+        });
+        videos.forEach((v) => {
+          if (v instanceof File) fd.append("videos", v);
+        });
+        await api.upload<{ id: number }>(
           "/owner/bikes",
           fd,
           me?.park_id ? { park_id: me.park_id } : undefined
         );
-        // Загружаем все файлы из локального массива
-        for (const p of photos) {
-          if (p instanceof File) {
-            const pfd = new FormData();
-            pfd.append("file", p);
-            await api.upload(
-              `/owner/bikes/${res.id}/photos`,
-              pfd,
-              me?.park_id ? { park_id: me.park_id } : undefined
-            );
-          }
-        }
-        for (const v of videos) {
-          if (v instanceof File) {
-            const vfd = new FormData();
-            vfd.append("file", v);
-            await api.upload(
-              `/owner/bikes/${res.id}/videos`,
-              vfd,
-              me?.park_id ? { park_id: me.park_id } : undefined
-            );
-          }
-        }
       } else {
         await api.patch(
           `/owner/bikes/${bikeId}`,
@@ -104,6 +95,10 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
             model: model.trim(),
             engine_cc: engineCc.trim() ? Number(engineCc) : null,
             daily_price: Number(dailyPrice),
+            price_3_days: price3.trim() ? Number(price3) : null,
+            price_7_days: price7.trim() ? Number(price7) : null,
+            price_14_days: price14.trim() ? Number(price14) : null,
+            price_30_days: price30.trim() ? Number(price30) : null,
             color: color.trim() || null,
             description: description.trim() || null,
             mileage_km: Number(mileage) || 0,
@@ -318,6 +313,23 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
           style={{ marginBottom: 10 }}
         />
 
+        <div className="section-title" style={{ marginTop: 8 }}>Цена за день в зависимости от срока</div>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          Укажите стоимость одного дня для каждого готового периода. Если клиент выберет произвольное количество дней, применяется базовая цена.
+        </div>
+        {[
+          ["3 дня", price3, setPrice3],
+          ["7 дней", price7, setPrice7],
+          ["14 дней", price14, setPrice14],
+          ["30 дней", price30, setPrice30],
+        ].map(([label, value, setter]: any) => (
+          <div key={label} style={{ marginBottom: 8 }}>
+            <label className="label">{label}, VND / день</label>
+            <input className="input" type="number" min="0" placeholder="Цена за день"
+              value={value} onChange={(e) => setter(e.target.value)} />
+          </div>
+        ))}
+
         <label className="label">Цвет</label>
         <input
           className="input"
@@ -517,6 +529,14 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
               : "Сохранить"}
           </button>
         </div>
+
+        {submitting && (
+          <div style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,.68)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", flexDirection: "column", gap: 12 }}>
+            <div className="bike-save-spinner" />
+            <strong>{mode === "create" ? "Создаём карточку байка…" : "Сохраняем изменения…"}</strong>
+            <span style={{ fontSize: 12, opacity: .8 }}>Пожалуйста, не закрывайте приложение</span>
+          </div>
+        )}
 
         {galleryStart !== null && (
           <GalleryModal

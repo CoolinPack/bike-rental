@@ -18,6 +18,12 @@ function todayISO(): string {
   return `${year}-${month}-${day}`;
 }
 
+function addDaysISO(value: string, count: number): string {
+  const d = new Date(value + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + count);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
 function diffDays(a: string, b: string): number {
   const da = new Date(a + "T00:00:00Z").getTime();
   const db = new Date(b + "T00:00:00Z").getTime();
@@ -38,9 +44,21 @@ export function BikeBookingModal({ bike, onClose, onCreated }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const days = useMemo(() => diffDays(start, end), [start, end]);
+  const appliedDailyPrice = useMemo(() => {
+    const tiers: Record<number, string | null | undefined> = {
+      3: bike.price_3_days,
+      7: bike.price_7_days,
+      14: bike.price_14_days,
+      30: bike.price_30_days,
+    };
+    const tier = tiers[days];
+    return tier !== undefined && tier !== null && tier !== ""
+      ? Number(tier)
+      : Number(bike.daily_price);
+  }, [bike, days]);
   const total = useMemo(
-    () => (Number(bike.daily_price) * days).toFixed(2),
-    [bike.daily_price, days]
+    () => (appliedDailyPrice * days).toFixed(0),
+    [appliedDailyPrice, days]
   );
   const invalidDates = end < start;
 
@@ -116,6 +134,30 @@ export function BikeBookingModal({ bike, onClose, onCreated }: Props) {
           </div>
         </div>
 
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+          {[
+            { days: 1, label: "1 день", price: bike.daily_price },
+            { days: 3, label: "3 дня", price: bike.price_3_days },
+            { days: 7, label: "7 дней", price: bike.price_7_days },
+            { days: 14, label: "14 дней", price: bike.price_14_days },
+            { days: 30, label: "1 месяц", price: bike.price_30_days },
+          ].map((item) => (
+            <button key={item.days} type="button" className={`chip ${days === item.days ? "active" : ""}`}
+              onClick={() => setEnd(addDaysISO(start, item.days - 1))}>
+              <span>{item.label}</span>
+              <span style={{ display: "inline-flex", gap: 5, alignItems: "baseline", marginLeft: 4 }}>
+                {Number(item.price ?? bike.daily_price) < Number(bike.daily_price) && (
+                  <span style={{ textDecoration: "line-through", opacity: .6, fontSize: 11 }}>
+                    {Number(bike.daily_price).toLocaleString("ru-RU")}
+                  </span>
+                )}
+                <strong>{Number(item.price ?? bike.daily_price).toLocaleString("ru-RU")}</strong>
+                <span style={{ fontSize: 10 }}>/ день</span>
+              </span>
+            </button>
+          ))}
+        </div>
+
         <div
           className="card"
           style={{
@@ -127,7 +169,7 @@ export function BikeBookingModal({ bike, onClose, onCreated }: Props) {
         >
           <span className="muted">
             {days} {days === 1 ? "день" : days < 5 ? "дня" : "дней"} ×{" "}
-            {bike.daily_price} $
+            {appliedDailyPrice.toLocaleString("ru-RU")} VND / день
           </span>
           <span style={{ fontSize: 20, fontWeight: 700 }}>{formatMoney(total)}</span>
         </div>

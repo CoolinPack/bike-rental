@@ -107,6 +107,9 @@ export function OwnerBikeViewModal({ bike, onClose, onEdit }: Props) {
                   : "На ТО"
               }
             />
+            {bike.status === "rented" && bike.rented_until && (
+              <InfoRow label="Ожидаемый возврат" value={formatDate(bike.rented_until)} />
+            )}
           </div>
 
           {bike.description && (
@@ -168,4 +171,9 @@ function formatMoney(v: string | number): string {
   const n = Number(v);
   if (isNaN(n)) return "0 VND";
   return n.toLocaleString("ru-RU") + " VND";
+}
+function formatDate(d: string): string {
+  return new Date(d + "T00:00:00").toLocaleDateString("ru-RU", {
+    day: "2-digit", month: "long", year: "numeric",
+  });
 }

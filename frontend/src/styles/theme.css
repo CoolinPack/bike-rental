@@ -1010,3 +1010,17 @@ html, body, * {
 }
 
 
+
+
+/* Blocking progress indicator while a bike card and its media are being saved. */
+.bike-save-spinner {
+  width: 38px;
+  height: 38px;
+  border: 3px solid rgba(255,255,255,.28);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: bike-save-spin .8s linear infinite;
+}
+@keyframes bike-save-spin {
+  to { transform: rotate(360deg); }
+}
