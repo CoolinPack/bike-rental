@@ -9,9 +9,13 @@ interface Props {
 }
 
 function todayISO(): string {
+  // Формируем дату по локальному календарю устройства.
+  // toISOString() переводит время в UTC и в UTC+7 может вернуть предыдущий день.
   const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function diffDays(a: string, b: string): number {
@@ -70,7 +74,7 @@ export function BikeBookingModal({ bike, onClose, onCreated }: Props) {
         client_name: name.trim(),
         client_phone: phone.trim(),
         deposit_comment,
-      });
+      }, { park_id: bike.park_id });
       onCreated();
     } catch (e: any) {
       setError(e.message || "Ошибка при создании заявки");
