@@ -201,28 +201,36 @@ async def delete_bike(
     conn: asyncpg.Connection, park_id: int, bike_id: int
 ) -> None:
     bike = await _assert_bike_in_park(conn, bike_id, park_id)
+    await conn.execute(
+        "DELETE FROM bikes WHERE id = $1 AND park_id = $2", bike_id, park_id
+    )
     for url in (bike.get("photos") or []):
         files_service.delete_upload(url)
     for url in (bike.get("videos") or []):
         files_service.delete_upload(url)
-    await conn.execute(
-        "DELETE FROM bikes WHERE id = $1 AND park_id = $2", bike_id, park_id
-    )
 
 
 async def add_photo(
     conn: asyncpg.Connection, park_id: int, bike_id: int, url: str
 ) -> list[str]:
-    bike = await _assert_bike_in_park(conn, bike_id, park_id)
-    photos = list(bike.get("photos") or [])
-    if len(photos) >= MAX_PHOTOS:
-        raise ValueError(f"Max {MAX_PHOTOS} photos per bike")
-    photos.append(url)
-    await conn.execute(
-        "UPDATE bikes SET photos = $1 WHERE id = $2 AND park_id = $3",
-        photos, bike_id, park_id,
+    row = await conn.fetchrow(
+        """
+        UPDATE bikes
+        SET photos = photos || to_jsonb($1::text)
+        WHERE id = $2 AND park_id = $3
+          AND jsonb_array_length(photos) < $4
+        RETURNING photos
+        """,
+        url, bike_id, park_id, MAX_PHOTOS,
     )
-    return photos
+    if row:
+        return list(row["photos"] or [])
+    exists = await conn.fetchval(
+        "SELECT 1 FROM bikes WHERE id=$1 AND park_id=$2", bike_id, park_id
+    )
+    if not exists:
+        raise PermissionError("Bike not found in your park")
+    raise ValueError(f"Max {MAX_PHOTOS} photos per bike")
 
 
 async def remove_photo(
@@ -230,29 +238,39 @@ async def remove_photo(
 ) -> list[str]:
     bike = await _assert_bike_in_park(conn, bike_id, park_id)
     photos = list(bike.get("photos") or [])
-    if url in photos:
+    removed = url in photos
+    if removed:
         photos.remove(url)
-        files_service.delete_upload(url)
     await conn.execute(
         "UPDATE bikes SET photos = $1 WHERE id = $2 AND park_id = $3",
         photos, bike_id, park_id,
     )
+    if removed:
+        files_service.delete_upload(url)
     return photos
 
 
 async def add_video(
     conn: asyncpg.Connection, park_id: int, bike_id: int, url: str
 ) -> list[str]:
-    bike = await _assert_bike_in_park(conn, bike_id, park_id)
-    videos = list(bike.get("videos") or [])
-    if len(videos) >= MAX_VIDEOS:
-        raise ValueError(f"Max {MAX_VIDEOS} videos per bike")
-    videos.append(url)
-    await conn.execute(
-        "UPDATE bikes SET videos = $1 WHERE id = $2 AND park_id = $3",
-        videos, bike_id, park_id,
+    row = await conn.fetchrow(
+        """
+        UPDATE bikes
+        SET videos = videos || to_jsonb($1::text)
+        WHERE id = $2 AND park_id = $3
+          AND jsonb_array_length(videos) < $4
+        RETURNING videos
+        """,
+        url, bike_id, park_id, MAX_VIDEOS,
     )
-    return videos
+    if row:
+        return list(row["videos"] or [])
+    exists = await conn.fetchval(
+        "SELECT 1 FROM bikes WHERE id=$1 AND park_id=$2", bike_id, park_id
+    )
+    if not exists:
+        raise PermissionError("Bike not found in your park")
+    raise ValueError(f"Max {MAX_VIDEOS} videos per bike")
 
 
 async def remove_video(
@@ -260,13 +278,15 @@ async def remove_video(
 ) -> list[str]:
     bike = await _assert_bike_in_park(conn, bike_id, park_id)
     videos = list(bike.get("videos") or [])
-    if url in videos:
+    removed = url in videos
+    if removed:
         videos.remove(url)
-        files_service.delete_upload(url)
     await conn.execute(
         "UPDATE bikes SET videos = $1 WHERE id = $2 AND park_id = $3",
         videos, bike_id, park_id,
     )
+    if removed:
+        files_service.delete_upload(url)
     return videos
 
 

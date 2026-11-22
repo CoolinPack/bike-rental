@@ -30,6 +30,15 @@ function diffDays(a: string, b: string): number {
   return Math.max(0, Math.round((db - da) / 86400000) + 1);
 }
 
+function dailyRateForDays(bike: BikeItem, days: number): number {
+  let tier: string | null | undefined;
+  if (days >= 30) tier = bike.price_30_days;
+  else if (days >= 14) tier = bike.price_14_days;
+  else if (days >= 7) tier = bike.price_7_days;
+  else if (days >= 3) tier = bike.price_3_days;
+  return Number(tier || bike.daily_price);
+}
+
 type DepositType = "cash" | "cash_passport";
 
 export function BikeBookingModal({ bike, onClose, onCreated }: Props) {
@@ -44,18 +53,10 @@ export function BikeBookingModal({ bike, onClose, onCreated }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const days = useMemo(() => diffDays(start, end), [start, end]);
-  const appliedDailyPrice = useMemo(() => {
-    const tiers: Record<number, string | null | undefined> = {
-      3: bike.price_3_days,
-      7: bike.price_7_days,
-      14: bike.price_14_days,
-      30: bike.price_30_days,
-    };
-    const tier = tiers[days];
-    return tier !== undefined && tier !== null && tier !== ""
-      ? Number(tier)
-      : Number(bike.daily_price);
-  }, [bike, days]);
+  const appliedDailyPrice = useMemo(
+    () => dailyRateForDays(bike, days),
+    [bike, days]
+  );
   const total = useMemo(
     () => (appliedDailyPrice * days).toFixed(0),
     [appliedDailyPrice, days]
@@ -134,28 +135,34 @@ export function BikeBookingModal({ bike, onClose, onCreated }: Props) {
           </div>
         </div>
 
+        <div className="muted" style={{ fontSize: 12, marginBottom: 7 }}>
+          Тариф за день зависит от длительности: 1–2, 3–6, 7–13, 14–29 или 30+ дней.
+        </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
           {[
-            { days: 1, label: "1 день", price: bike.daily_price },
-            { days: 3, label: "3 дня", price: bike.price_3_days },
-            { days: 7, label: "7 дней", price: bike.price_7_days },
-            { days: 14, label: "14 дней", price: bike.price_14_days },
-            { days: 30, label: "1 месяц", price: bike.price_30_days },
-          ].map((item) => (
-            <button key={item.days} type="button" className={`chip ${days === item.days ? "active" : ""}`}
-              onClick={() => setEnd(addDaysISO(start, item.days - 1))}>
-              <span>{item.label}</span>
-              <span style={{ display: "inline-flex", gap: 5, alignItems: "baseline", marginLeft: 4 }}>
-                {Number(item.price ?? bike.daily_price) < Number(bike.daily_price) && (
-                  <span style={{ textDecoration: "line-through", opacity: .6, fontSize: 11 }}>
-                    {Number(bike.daily_price).toLocaleString("ru-RU")}
-                  </span>
-                )}
-                <strong>{Number(item.price ?? bike.daily_price).toLocaleString("ru-RU")}</strong>
-                <span style={{ fontSize: 10 }}>/ день</span>
-              </span>
-            </button>
-          ))}
+            { days: 1, label: "1 день" },
+            { days: 3, label: "3 дня" },
+            { days: 7, label: "7 дней" },
+            { days: 14, label: "14 дней" },
+            { days: 30, label: "1 месяц" },
+          ].map((item) => {
+            const price = dailyRateForDays(bike, item.days);
+            return (
+              <button key={item.days} type="button" className={`chip ${days === item.days ? "active" : ""}`}
+                onClick={() => setEnd(addDaysISO(start, item.days - 1))}>
+                <span>{item.label}</span>
+                <span style={{ display: "inline-flex", gap: 5, alignItems: "baseline", marginLeft: 4 }}>
+                  {price < Number(bike.daily_price) && (
+                    <span style={{ textDecoration: "line-through", opacity: .6, fontSize: 11 }}>
+                      {Number(bike.daily_price).toLocaleString("ru-RU")}
+                    </span>
+                  )}
+                  <strong>{price.toLocaleString("ru-RU")}</strong>
+                  <span style={{ fontSize: 10 }}>/ день</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         <div

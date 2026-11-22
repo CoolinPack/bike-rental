@@ -176,6 +176,10 @@ async def create_bike(
         raise HTTPException(
             409, "Bike with this plate_number already exists in your park"
         )
+    except Exception:
+        for url in photo_urls + video_urls:
+            files_service.delete_upload(url)
+        raise
 
     return {"id": bike_id}
 
@@ -242,6 +246,10 @@ async def upload_photo(
         if url:
             files_service.delete_upload(url)
         raise HTTPException(400, str(e))
+    except Exception:
+        if url:
+            files_service.delete_upload(url)
+        raise
     return {"photos": photos}
 
 
@@ -278,6 +286,10 @@ async def upload_video(
         if url:
             files_service.delete_upload(url)
         raise HTTPException(400, str(e))
+    except Exception:
+        if url:
+            files_service.delete_upload(url)
+        raise
     return {"videos": videos}
 
 
@@ -372,6 +384,8 @@ async def accept_request(
         result = await bookings_service.accept_request(db, _park(ctx), booking_id)
     except PermissionError as e:
         raise HTTPException(404, str(e))
+    except bookings_service.BookingConflictError as e:
+        raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
     return result

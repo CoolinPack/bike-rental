@@ -6,6 +6,25 @@ import asyncpg
 from app.models.schemas import BookingRequestCreate
 
 
+class BookingConflictError(ValueError):
+    """Raised when another request/rental already holds the selected dates."""
+
+
+def daily_rate_for_days(bike: dict, days: int):
+    """Return the configured per-day rate for the selected duration band."""
+    if days >= 30:
+        tier = bike.get("price_30_days")
+    elif days >= 14:
+        tier = bike.get("price_14_days")
+    elif days >= 7:
+        tier = bike.get("price_7_days")
+    elif days >= 3:
+        tier = bike.get("price_3_days")
+    else:
+        tier = None
+    return tier if tier is not None else bike["daily_price"]
+
+
 async def _get_bike_in_park(
     conn: asyncpg.Connection, bike_id: int, park_id: int
 ) -> dict | None:
@@ -71,16 +90,10 @@ async def create_request(
             raise ValueError("Bike is under maintenance")
 
         if await has_overlap(conn, data.bike_id, data.start_date, data.end_date):
-            raise ValueError("Bike is already booked or requested for these dates")
+            raise BookingConflictError("Байк уже забронирован на выбранные даты. Выберите другой период.")
 
         days = (data.end_date - data.start_date).days + 1
-        tier_price = {
-            3: bike.get("price_3_days"),
-            7: bike.get("price_7_days"),
-            14: bike.get("price_14_days"),
-            30: bike.get("price_30_days"),
-        }.get(days)
-        applied_daily_price = tier_price if tier_price is not None else bike["daily_price"]
+        applied_daily_price = daily_rate_for_days(bike, days)
         total = applied_daily_price * days
 
         booking_id = await conn.fetchval(
@@ -271,39 +284,51 @@ async def list_owner_requests(
 async def accept_request(
     conn: asyncpg.Connection, park_id: int, booking_id: int
 ) -> dict:
-    row = await conn.fetchrow(
-        "SELECT * FROM bookings WHERE id = $1 AND park_id = $2",
-        booking_id, park_id,
-    )
-    if not row:
-        raise PermissionError("Request not found")
-    if row["status"] != "pending":
-        raise ValueError(f"Booking is {row['status']}, cannot accept")
+    async with conn.transaction():
+        row = await conn.fetchrow(
+            "SELECT * FROM bookings WHERE id = $1 AND park_id = $2",
+            booking_id, park_id,
+        )
+        if not row:
+            raise PermissionError("Request not found")
 
-    if await has_overlap(
-        conn, row["bike_id"], row["start_date"], row["end_date"],
-        exclude_booking_id=booking_id,
-    ):
-        raise ValueError("Dates already booked by another active booking")
+        # Use the same per-bike lock as new booking requests.
+        await conn.execute("SELECT pg_advisory_xact_lock($1)", row["bike_id"])
+        row = await conn.fetchrow(
+            "SELECT * FROM bookings WHERE id = $1 AND park_id = $2 FOR UPDATE",
+            booking_id, park_id,
+        )
+        if not row:
+            raise PermissionError("Request not found")
+        if row["status"] != "pending":
+            raise ValueError(f"Booking is {row['status']}, cannot accept")
 
-    await conn.execute(
-        "UPDATE bookings SET status = 'active', accepted_at = NOW() "
-        "WHERE id = $1",
-        booking_id,
-    )
-    # A future reservation blocks its dates but should not mark the bike
-    # as physically rented until the pickup day.
-    await conn.execute(
-        """
-        UPDATE bikes SET status = CASE
-          WHEN $3 <= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-          THEN 'rented' ELSE status END
-        WHERE id = $1 AND park_id = $2
-        """,
-        row["bike_id"], park_id, row["start_date"],
-    )
+        if await has_overlap(
+            conn, row["bike_id"], row["start_date"], row["end_date"],
+            exclude_booking_id=booking_id,
+        ):
+            raise BookingConflictError(
+                "Байк уже забронирован на эти даты другой заявкой."
+            )
 
-    # Уведомление клиенту
+        await conn.execute(
+            "UPDATE bookings SET status = 'active', accepted_at = NOW() "
+            "WHERE id = $1",
+            booking_id,
+        )
+        # A future reservation blocks dates but is physically rented only
+        # when its pickup date arrives.
+        await conn.execute(
+            """
+            UPDATE bikes SET status = CASE
+              WHEN $3 <= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+              THEN 'rented' ELSE status END
+            WHERE id = $1 AND park_id = $2
+            """,
+            row["bike_id"], park_id, row["start_date"],
+        )
+
+    # Notify the client after the transaction commits.
     try:
         from app.bot.notifications import notify_client_accepted
         bike = await conn.fetchrow(
@@ -332,17 +357,25 @@ async def accept_request(
 async def reject_request(
     conn: asyncpg.Connection, park_id: int, booking_id: int, reason: str | None
 ) -> None:
-    row = await conn.fetchrow(
-        "SELECT * FROM bookings WHERE id = $1 AND park_id = $2",
-        booking_id, park_id,
-    )
-    if not row:
-        raise PermissionError("Request not found")
-    if row["status"] != "pending":
-        raise ValueError(f"Booking is {row['status']}, cannot reject")
-    await conn.execute(
-        "UPDATE bookings SET status = 'rejected' WHERE id = $1", booking_id
-    )
+    async with conn.transaction():
+        row = await conn.fetchrow(
+            "SELECT * FROM bookings WHERE id = $1 AND park_id = $2",
+            booking_id, park_id,
+        )
+        if not row:
+            raise PermissionError("Request not found")
+        await conn.execute("SELECT pg_advisory_xact_lock($1)", row["bike_id"])
+        row = await conn.fetchrow(
+            "SELECT * FROM bookings WHERE id = $1 AND park_id = $2 FOR UPDATE",
+            booking_id, park_id,
+        )
+        if not row:
+            raise PermissionError("Request not found")
+        if row["status"] != "pending":
+            raise ValueError(f"Booking is {row['status']}, cannot reject")
+        await conn.execute(
+            "UPDATE bookings SET status = 'rejected' WHERE id = $1", booking_id
+        )
 
     try:
         from app.bot.notifications import notify_client_rejected
@@ -414,9 +447,15 @@ async def extend_booking(
     """Extend an active rental and preserve original/extension amounts separately."""
     async with conn.transaction():
         row = await conn.fetchrow(
-            "SELECT * FROM bookings WHERE id=$1 AND park_id=$2 FOR UPDATE",
+            "SELECT * FROM bookings WHERE id=$1 AND park_id=$2",
             booking_id, park_id,
         )
+        if row:
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", row["bike_id"])
+            row = await conn.fetchrow(
+                "SELECT * FROM bookings WHERE id=$1 AND park_id=$2 FOR UPDATE",
+                booking_id, park_id,
+            )
         if not row:
             raise PermissionError("Booking not found")
         if row["status"] != "active":
@@ -443,9 +482,7 @@ async def extend_booking(
             row["bike_id"], park_id,
         )
         days = (new_end_date - old_end).days
-        tier = {3: bike["price_3_days"], 7: bike["price_7_days"],
-                14: bike["price_14_days"], 30: bike["price_30_days"]}.get(days)
-        daily = tier if tier is not None else bike["daily_price"]
+        daily = daily_rate_for_days(dict(bike), days)
         amount = daily * days
         await conn.execute(
             """

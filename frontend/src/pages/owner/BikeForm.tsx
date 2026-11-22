@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
 import { BikeItem } from "../../types";
 import { useAuth } from "../../store/auth";
@@ -52,6 +52,28 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
 
   const fileInput = useRef<HTMLInputElement>(null);
   const bikeId = bike?.id;
+
+  // Create object URLs once per selected File and release them when previews change.
+  const previewMedia = useMemo(() => {
+    const created: string[] = [];
+    const resolve = (item: string | File) => {
+      if (item instanceof File) {
+        const url = URL.createObjectURL(item);
+        created.push(url);
+        return url;
+      }
+      return item;
+    };
+    return {
+      photos: photos.map(resolve),
+      videos: videos.map(resolve),
+      created,
+    };
+  }, [photos, videos]);
+
+  useEffect(() => {
+    return () => previewMedia.created.forEach((url) => URL.revokeObjectURL(url));
+  }, [previewMedia]);
 
   async function submit() {
     setError(null);
@@ -137,33 +159,40 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
   // ============ РАБОТА С ФОТО ============
 
   async function handleFiles(files: FileList) {
-    if (!bikeId) {
-      // Режим создания: просто добавляем файлы в локальный массив
-      const fileArr = Array.from(files);
-      const images = fileArr.filter((f) => f.type.startsWith("image/"));
-      const vids = fileArr.filter((f) => f.type.startsWith("video/"));
+    const selected = Array.from(files);
+    const allowedImage = new Set(["image/jpeg", "image/png", "image/webp"]);
+    const allowedVideo = new Set(["video/mp4", "video/quicktime", "video/webm"]);
+    const images = selected.filter((f) => allowedImage.has(f.type));
+    const vids = selected.filter((f) => allowedVideo.has(f.type));
+    const unsupported = selected.length - images.length - vids.length;
+    const oversizedImages = images.filter((f) => f.size > 10 * 1024 * 1024);
+    const oversizedVideos = vids.filter((f) => f.size > 50 * 1024 * 1024);
+    const validImages = images.filter((f) => f.size <= 10 * 1024 * 1024);
+    const validVideos = vids.filter((f) => f.size <= 50 * 1024 * 1024);
+    const remainingPhotos = Math.max(0, MAX_PHOTOS - photos.length);
+    const remainingVideos = Math.max(0, MAX_VIDEOS - videos.length);
+    const acceptedImages = validImages.slice(0, remainingPhotos);
+    const acceptedVideos = validVideos.slice(0, remainingVideos);
 
-      setPhotos((prev) => {
-        const room = MAX_PHOTOS - prev.length;
-        return [...prev, ...images.slice(0, room)];
-      });
-      setVideos((prev) => {
-        const room = MAX_VIDEOS - prev.length;
-        return [...prev, ...vids.slice(0, room)];
-      });
+    const warnings: string[] = [];
+    if (unsupported) warnings.push("Некоторые файлы имеют неподдерживаемый формат");
+    if (oversizedImages.length) warnings.push("Фото должны быть не больше 10 МБ");
+    if (oversizedVideos.length) warnings.push("Видео должно быть не больше 50 МБ");
+    if (validImages.length > remainingPhotos) warnings.push("Можно добавить максимум 5 фото");
+    if (validVideos.length > remainingVideos) warnings.push("Можно добавить максимум 1 видео");
+
+    setError(warnings.length ? warnings.join(". ") + "." : null);
+    if (!acceptedImages.length && !acceptedVideos.length) return;
+
+    if (!bikeId) {
+      setPhotos((prev) => [...prev, ...acceptedImages]);
+      setVideos((prev) => [...prev, ...acceptedVideos]);
       return;
     }
 
-    // Режим редактирования: сразу грузим
     setUploading(true);
-    setError(null);
     try {
-      const fileArr = Array.from(files);
-      const images = fileArr.filter((f) => f.type.startsWith("image/"));
-      const vids = fileArr.filter((f) => f.type.startsWith("video/"));
-
-      for (const img of images) {
-        if (photos.length >= MAX_PHOTOS) break;
+      for (const img of acceptedImages) {
         const fd = new FormData();
         fd.append("file", img);
         const res = await api.upload<{ photos: string[] }>(
@@ -173,10 +202,9 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
         );
         setPhotos(res.photos);
       }
-      for (const v of vids) {
-        if (videos.length >= MAX_VIDEOS) break;
+      for (const video of acceptedVideos) {
         const fd = new FormData();
-        fd.append("file", v);
+        fd.append("file", video);
         const res = await api.upload<{ videos: string[] }>(
           `/owner/bikes/${bikeId}/videos`,
           fd,
@@ -264,11 +292,7 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
         {photos.length > 0 && (
           <div className="media-preview-hero">
             <img
-              src={
-                photos[0] instanceof File
-                  ? URL.createObjectURL(photos[0])
-                  : photos[0]
-              }
+              src={previewMedia.photos[0]}
               alt="Главное фото"
             />
             <div className="media-preview-hero-label">Главное фото</div>
@@ -315,18 +339,18 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
 
         <div className="section-title" style={{ marginTop: 8 }}>Цена за день в зависимости от срока</div>
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-          Укажите стоимость одного дня для каждого готового периода. Если клиент выберет произвольное количество дней, применяется базовая цена.
+          Базовая цена действует 1–2 дня. Для более долгого срока выбирается тариф соответствующего диапазона; сумма = цена за день × число дней.
         </div>
         {[
-          ["3 дня", price3, setPrice3],
-          ["7 дней", price7, setPrice7],
-          ["14 дней", price14, setPrice14],
-          ["30 дней", price30, setPrice30],
+          ["3–6 дней", price3, setPrice3],
+          ["7–13 дней", price7, setPrice7],
+          ["14–29 дней", price14, setPrice14],
+          ["30+ дней", price30, setPrice30],
         ].map(([label, value, setter]: any) => (
           <div key={label} style={{ marginBottom: 8 }}>
             <label className="label">{label}, VND / день</label>
-            <input className="input" type="number" min="0" placeholder="Цена за день"
-              value={value} onChange={(e) => setter(e.target.value)} />
+            <input className="input" type="number" min="0"
+              value={value} onChange={(e) => setter(e.target.value)} placeholder={label === "3–6 дней" ? "450000" : label === "7–13 дней" ? "420000" : label === "14–29 дней" ? "400000" : "350000"} />
           </div>
         ))}
 
@@ -388,9 +412,8 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
         </div>
 
         <div className="media-grid">
-          {photos.map((src, idx) => {
-            const url =
-              src instanceof File ? URL.createObjectURL(src) : src;
+          {photos.map((_, idx) => {
+            const url = previewMedia.photos[idx];
             return (
               <div
                 key={`p-${idx}`}
@@ -421,9 +444,8 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
               </div>
             );
           })}
-          {videos.map((src, idx) => {
-            const url =
-              src instanceof File ? URL.createObjectURL(src) : src;
+          {videos.map((_, idx) => {
+            const url = previewMedia.videos[idx];
             return (
               <div
                 key={`v-${idx}`}
@@ -477,7 +499,7 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
         <input
           ref={fileInput}
           type="file"
-          accept="image/*,video/*"
+          accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
           multiple
           style={{ display: "none" }}
           onChange={(e) => {
@@ -541,12 +563,12 @@ export function OwnerBikeForm({ mode, bike, onClose, onSaved }: Props) {
         {galleryStart !== null && (
           <GalleryModal
             items={[
-              ...photos.map((p) => ({
-                src: p instanceof File ? URL.createObjectURL(p) : p,
+              ...previewMedia.photos.map((src) => ({
+                src,
                 kind: "image" as const,
               })),
-              ...videos.map((v) => ({
-                src: v instanceof File ? URL.createObjectURL(v) : v,
+              ...previewMedia.videos.map((src) => ({
+                src,
                 kind: "video" as const,
               })),
             ]}

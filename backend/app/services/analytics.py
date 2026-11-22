@@ -1,5 +1,6 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import asyncpg
 
@@ -7,7 +8,8 @@ import asyncpg
 def default_period(
     from_date: date | None, to_date: date | None
 ) -> tuple[date, date]:
-    to_d = to_date or date.today()
+    vietnam_today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
+    to_d = to_date or vietnam_today
     from_d = from_date or (to_d - timedelta(days=29))
     return from_d, to_d
 
@@ -30,8 +32,7 @@ async def summary(
         FROM bookings
         WHERE park_id = $1
           AND status = 'completed'
-          AND start_date >= $2
-          AND end_date <= $3
+          AND start_date BETWEEN $2 AND $3
           {bike_cond}
         """,
         *args,
@@ -78,12 +79,22 @@ async def by_bikes(
             SELECT bike_id,
                    COALESCE(SUM(total_price), 0) AS revenue,
                    COUNT(*) AS bookings_count,
-                   COALESCE(SUM(end_date - start_date + 1), 0) AS rented_days
+                   COALESCE(AVG(end_date - start_date + 1), 0) AS avg_rental_days
             FROM bookings
             WHERE park_id = $1
               AND status = 'completed'
-              AND start_date >= $2
-              AND end_date <= $3
+              AND start_date BETWEEN $2 AND $3
+            GROUP BY bike_id
+        ),
+        occupancy AS (
+            SELECT bike_id,
+                   COALESCE(SUM(
+                       LEAST(end_date, $3) - GREATEST(start_date, $2) + 1
+                   ), 0) AS rented_days
+            FROM bookings
+            WHERE park_id = $1
+              AND status IN ('active', 'completed')
+              AND NOT (end_date < $2 OR start_date > $3)
             GROUP BY bike_id
         ),
         expenses_agg AS (
@@ -101,9 +112,11 @@ async def by_bikes(
             COALESCE(r.revenue, 0) AS revenue,
             COALESCE(e.expenses, 0) AS expenses,
             COALESCE(r.bookings_count, 0) AS bookings_count,
-            COALESCE(r.rented_days, 0) AS rented_days
+            COALESCE(o.rented_days, 0) AS rented_days,
+            COALESCE(r.avg_rental_days, 0) AS avg_rental_days
         FROM bikes b
         LEFT JOIN revenue r ON r.bike_id = b.id
+        LEFT JOIN occupancy o ON o.bike_id = b.id
         LEFT JOIN expenses_agg e ON e.bike_id = b.id
         WHERE b.park_id = $1
         ORDER BY revenue DESC, b.id ASC
@@ -135,11 +148,8 @@ async def by_bikes(
             else Decimal("0")
         )
         idle_days = max(0, period_days - rented_days)
-        avg_rental_days = (
-            (Decimal(rented_days) / Decimal(int(r["bookings_count"])))
-            .quantize(Decimal("0.01"))
-            if int(r["bookings_count"]) > 0
-            else Decimal("0")
+        avg_rental_days = Decimal(str(r["avg_rental_days"])).quantize(
+            Decimal("0.01")
         )
         result.append({
             "bike_id": r["bike_id"],
@@ -200,8 +210,10 @@ async def timeline(
 ) -> list[dict]:
     if granularity == "month":
         bucket = "date_trunc('month', start_date)::date"
+        exp_bucket = "date_trunc('month', expense_date)::date"
     else:
         bucket = "start_date"
+        exp_bucket = "expense_date"
 
     bike_cond = " AND bike_id = $4" if bike_id else ""
     args = [park_id, from_date, to_date] + ([bike_id] if bike_id else [])
@@ -214,19 +226,13 @@ async def timeline(
         FROM bookings
         WHERE park_id = $1
           AND status = 'completed'
-          AND start_date >= $2
-          AND end_date <= $3
+          AND start_date BETWEEN $2 AND $3
           {bike_cond}
         GROUP BY period
         ORDER BY period ASC
         """,
         *args,
     )
-
-    if granularity == "month":
-        exp_bucket = "date_trunc('month', expense_date)::date"
-    else:
-        exp_bucket = "expense_date"
 
     expense_rows = await conn.fetch(
         f"""
@@ -235,10 +241,11 @@ async def timeline(
         FROM expenses
         WHERE park_id = $1
           AND expense_date BETWEEN $2 AND $3
+          {bike_cond}
         GROUP BY period
         ORDER BY period ASC
         """,
-        park_id, from_date, to_date,
+        *args,
     )
 
     merged: dict[date, dict] = {}
@@ -278,7 +285,7 @@ async def suspicious_expenses(
             SELECT bike_id, category, COUNT(*) AS cnt
             FROM expenses
             WHERE park_id = $1
-              AND expense_date >= CURRENT_DATE - INTERVAL '30 days'
+              AND expense_date >= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - 30
               AND category NOT ILIKE '%топлив%'
               AND category NOT ILIKE '%бензин%'
               AND category NOT ILIKE '%fuel%'
@@ -289,8 +296,8 @@ async def suspicious_expenses(
             SELECT bike_id, category, COUNT(*) AS cnt
             FROM expenses
             WHERE park_id = $1
-              AND expense_date >= CURRENT_DATE - INTERVAL '90 days'
-              AND expense_date < CURRENT_DATE - INTERVAL '30 days'
+              AND expense_date >= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - 90
+              AND expense_date < (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - 30
             GROUP BY bike_id, category
         )
         SELECT r.bike_id, r.category, r.cnt AS recent_count,

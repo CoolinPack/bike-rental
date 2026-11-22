@@ -51,13 +51,20 @@ interface SuspiciousItem {
   message: string;
 }
 
+function localDateISO(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function defaultRange() {
   const to = new Date();
   const from = new Date();
   from.setDate(from.getDate() - 29);
   return {
-    from: from.toISOString().slice(0, 10),
-    to: to.toISOString().slice(0, 10),
+    from: localDateISO(from),
+    to: localDateISO(to),
   };
 }
 
@@ -72,6 +79,7 @@ export function OwnerAnalyticsPage() {
   const [suspicious, setSuspicious] = useState<SuspiciousItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showMethodology, setShowMethodology] = useState(false);
 
   useEffect(() => {
     api
@@ -140,6 +148,29 @@ export function OwnerAnalyticsPage() {
   return (
     <div className="page">
       <h1 className="page-title">Аналитика</h1>
+
+      <button
+        className="btn btn-secondary"
+        type="button"
+        onClick={() => setShowMethodology((value) => !value)}
+        style={{ width: "100%", marginBottom: 12 }}
+      >
+        {showMethodology ? "Скрыть методику расчёта" : "Как считается аналитика?"}
+      </button>
+      {showMethodology && (
+        <div className="card" style={{ marginBottom: 16, fontSize: 13, lineHeight: 1.5 }}>
+          <strong>Откуда берутся цифры</strong>
+          <ul style={{ paddingLeft: 18, margin: "8px 0 0" }}>
+            <li><b>Выручка:</b> сумма total_price завершённых аренд (status = completed), начавшихся в выбранном периоде. Сумма включает продления и относится к дате начала аренды.</li>
+            <li><b>Расходы:</b> записи из раздела расходов по дате расхода. При выборе байка учитываются только расходы этого байка.</li>
+            <li><b>Прибыль:</b> выручка минус расходы. Это операционная разница, не бухгалтерская чистая прибыль.</li>
+            <li><b>Средний чек:</b> выручка, делённая на количество завершённых аренд.</li>
+            <li><b>Загрузка байка:</b> дни пересечения активных и завершённых аренд с выбранным периодом, делённые на число календарных дней периода. Ожидающие заявки не считаются арендой.</li>
+            <li><b>Средняя аренда:</b> средняя полная длительность завершённых аренд, начавшихся в выбранном периоде.</li>
+            <li><b>Предупреждения:</b> ищут повторные расходы одной категории по байку: минимум 2 за последние 30 дней и не более 1 за предыдущие 60 дней. Топливо исключается.</li>
+          </ul>
+        </div>
+      )}
 
       <div className="row" style={{ gap: 8, marginBottom: 12 }}>
         <div style={{ flex: 1 }}>
@@ -238,7 +269,7 @@ export function OwnerAnalyticsPage() {
             color="var(--accent)"
             wide
           />
-          <Stat label="Броней" value={String(summary.bookings_count)} />
+          <Stat label="Завершённых аренд" value={String(summary.bookings_count)} />
           <Stat label="Средний чек" value={formatMoney(summary.avg_ticket)} />
         </div>
       )}

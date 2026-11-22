@@ -141,6 +141,8 @@ async def create_booking_request(
         )
     except PermissionError as e:
         raise HTTPException(404, str(e))
+    except bookings_service.BookingConflictError as e:
+        raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"id": booking_id, "status": "pending"}
