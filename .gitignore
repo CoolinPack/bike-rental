@@ -1,3 +1,4 @@
+
 # Python
 __pycache__/
 *.py[cod]
@@ -33,4 +34,17 @@ backend/uploads/*
 backend/body_*.json
 body_*.json
 apply_patch_*.py
-backend/uploads/*   
+
+# Database backups - never commit
+backups/
+*.dump
+*.backup
+
+# Local backup copies
+*.bak
+
+# TypeScript build cache
+*.tsbuildinfo
+
+# TypeScript build cache
+*.tsbuildinfo

@@ -52,17 +52,21 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("Failed to delete legacy webhook")
 
-    # Фоновые напоминания
+    # Background jobs: booking reminders and retryable media cleanup.
+    from app.services.media_cleanup import media_cleanup_worker
     reminder_task = asyncio.create_task(reminder_worker())
+    media_cleanup_task = asyncio.create_task(media_cleanup_worker())
 
     try:
         yield
     finally:
         reminder_task.cancel()
-        try:
-            await reminder_task
-        except asyncio.CancelledError:
-            pass
+        media_cleanup_task.cancel()
+        for task in (reminder_task, media_cleanup_task):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         await shutdown_bot()
         await close_pool()
 

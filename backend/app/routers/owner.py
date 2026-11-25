@@ -1,3 +1,5 @@
+
+import logging
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
@@ -43,12 +45,33 @@ from app.services import bookings as bookings_service
 from app.services import expenses as expenses_service
 from app.services import files as files_service
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/owner", tags=["owner"])
 
 
 def _park(ctx: UserContext) -> int:
     assert ctx.park_id is not None
     return ctx.park_id
+
+
+async def _queue_uploaded_media(
+    db: asyncpg.Connection,
+    park_id: int,
+    urls: list[str],
+) -> None:
+    """
+    Ставит загруженные, но не прикреплённые к байку файлы
+    в очередь фоновой очистки.
+    """
+    for url in urls:
+        try:
+            await bikes_service.queue_media_cleanup(db, park_id, url)
+        except Exception:
+            logger.exception(
+                "Failed to queue uploaded media cleanup for park_id=%s",
+                park_id,
+            )
 
 
 def _bike_item(r: dict) -> BikeItem:
@@ -135,8 +158,10 @@ async def create_bike(
 
     if bike_status not in ("available", "rented", "maintenance"):
         raise HTTPException(400, "Invalid status")
+
     if len(photos) > bikes_service.MAX_PHOTOS:
         raise HTTPException(400, f"Max {bikes_service.MAX_PHOTOS} photos")
+
     if len(videos) > bikes_service.MAX_VIDEOS:
         raise HTTPException(400, f"Max {bikes_service.MAX_VIDEOS} videos")
 
@@ -144,10 +169,19 @@ async def create_bike(
     video_urls: list[str] = []
 
     try:
-        for p in photos:
-            photo_urls.append(await files_service.save_upload(p, "image"))
-        for v in videos:
-            video_urls.append(await files_service.save_upload(v, "video"))
+        for photo in photos:
+            photo_urls.append(
+                await files_service.save_upload(
+                    photo, "image", _park(ctx)
+                )
+            )
+
+        for video in videos:
+            video_urls.append(
+                await files_service.save_upload(
+                    video, "video", _park(ctx)
+                )
+            )
 
         data = BikeCreate(
             plate_number=plate_number,
@@ -163,22 +197,30 @@ async def create_bike(
             mileage_km=mileage_km,
             status=bike_status,  # type: ignore[arg-type]
         )
+
         bike_id = await bikes_service.create_bike(
             db, _park(ctx), data, photo_urls, video_urls
         )
+
     except (ValueError, PermissionError, InvalidOperation) as e:
-        for url in photo_urls + video_urls:
-            files_service.delete_upload(url)
-        raise HTTPException(400, str(e))
-    except asyncpg.UniqueViolationError:
-        for url in photo_urls + video_urls:
-            files_service.delete_upload(url)
-        raise HTTPException(
-            409, "Bike with this plate_number already exists in your park"
+        await _queue_uploaded_media(
+            db, _park(ctx), photo_urls + video_urls
         )
+        raise HTTPException(400, str(e))
+
+    except asyncpg.UniqueViolationError:
+        await _queue_uploaded_media(
+            db, _park(ctx), photo_urls + video_urls
+        )
+        raise HTTPException(
+            409,
+            "Bike with this plate_number already exists in your park",
+        )
+
     except Exception:
-        for url in photo_urls + video_urls:
-            files_service.delete_upload(url)
+        await _queue_uploaded_media(
+            db, _park(ctx), photo_urls + video_urls
+        )
         raise
 
     return {"id": bike_id}
@@ -235,21 +277,31 @@ async def upload_photo(
     db: asyncpg.Connection = Depends(get_db),
 ):
     url: str | None = None
+
     try:
-        url = await files_service.save_upload(file, "image")
-        photos = await bikes_service.add_photo(db, _park(ctx), bike_id, url)
+        url = await files_service.save_upload(
+            file, "image", _park(ctx)
+        )
+
+        photos = await bikes_service.add_photo(
+            db, _park(ctx), bike_id, url
+        )
+
     except PermissionError as e:
         if url:
-            files_service.delete_upload(url)
+            await _queue_uploaded_media(db, _park(ctx), [url])
         raise HTTPException(404, str(e))
+
     except ValueError as e:
         if url:
-            files_service.delete_upload(url)
+            await _queue_uploaded_media(db, _park(ctx), [url])
         raise HTTPException(400, str(e))
+
     except Exception:
         if url:
-            files_service.delete_upload(url)
+            await _queue_uploaded_media(db, _park(ctx), [url])
         raise
+
     return {"photos": photos}
 
 
@@ -275,21 +327,31 @@ async def upload_video(
     db: asyncpg.Connection = Depends(get_db),
 ):
     url: str | None = None
+
     try:
-        url = await files_service.save_upload(file, "video")
-        videos = await bikes_service.add_video(db, _park(ctx), bike_id, url)
+        url = await files_service.save_upload(
+            file, "video", _park(ctx)
+        )
+
+        videos = await bikes_service.add_video(
+            db, _park(ctx), bike_id, url
+        )
+
     except PermissionError as e:
         if url:
-            files_service.delete_upload(url)
+            await _queue_uploaded_media(db, _park(ctx), [url])
         raise HTTPException(404, str(e))
+
     except ValueError as e:
         if url:
-            files_service.delete_upload(url)
+            await _queue_uploaded_media(db, _park(ctx), [url])
         raise HTTPException(400, str(e))
+
     except Exception:
         if url:
-            files_service.delete_upload(url)
+            await _queue_uploaded_media(db, _park(ctx), [url])
         raise
+
     return {"videos": videos}
 
 
@@ -461,9 +523,13 @@ async def analytics_timeline(
     db: asyncpg.Connection = Depends(get_db),
 ):
     f, t = analytics_service.default_period(from_date, to_date)
-    rows = await analytics_service.timeline(db, _park(ctx), f, t, granularity, bike_id)
+    rows = await analytics_service.timeline(
+        db, _park(ctx), f, t, granularity, bike_id
+    )
     items = [TimelineItem(**r) for r in rows]
-    return TimelineResponse(items=items, total=len(items), granularity=granularity)
+    return TimelineResponse(
+        items=items, total=len(items), granularity=granularity
+    )
 
 
 # ============ PROFILE ============
@@ -489,6 +555,7 @@ async def get_owner_profile(
 
     now = _dt.now(_tz.utc)
     expires = row["subscription_expires_at"]
+
     if expires is None:
         is_expired = True
         days_left = 0
