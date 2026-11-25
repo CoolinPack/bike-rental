@@ -210,14 +210,14 @@ export function BikeBookingModal({ bike, onClose, onCreated }: Props) {
         />
 
         <label className="label">Залог</label>
-        <div className="col" style={{ marginBottom: 16 }}>
+        <div className="col" style={{ marginBottom: 16, alignItems: "flex-start" }}>
           <label style={depositOptionStyle(depositType === "cash")}>
             <input
               type="radio"
               name="deposit"
               checked={depositType === "cash"}
               onChange={() => setDepositType("cash")}
-              style={{ marginRight: 10 }}
+              style={{ width: 18, minWidth: 18, maxWidth: 18, height: 18, minHeight: 18, padding: 0, margin: 0, flex: "0 0 18px", appearance: "auto", accentColor: "var(--ac)", border: 0, boxShadow: "none" }}
             />
             <span>Наличные</span>
           </label>
@@ -227,7 +227,7 @@ export function BikeBookingModal({ bike, onClose, onCreated }: Props) {
               name="deposit"
               checked={depositType === "cash_passport"}
               onChange={() => setDepositType("cash_passport")}
-              style={{ marginRight: 10 }}
+              style={{ width: 18, minWidth: 18, maxWidth: 18, height: 18, minHeight: 18, padding: 0, margin: 0, flex: "0 0 18px", appearance: "auto", accentColor: "var(--ac)", border: 0, boxShadow: "none" }}
             />
             <span>Наличные + паспорт</span>
           </label>
@@ -236,7 +236,6 @@ export function BikeBookingModal({ bike, onClose, onCreated }: Props) {
         <label className="label">Комментарий (необязательно)</label>
         <textarea
           className="input"
-          placeholder="Уточнения, сумма залога и т.д."
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           style={{ minHeight: 60, marginBottom: 16, resize: "vertical" }}
@@ -268,7 +267,14 @@ function depositOptionStyle(active: boolean): React.CSSProperties {
   return {
     display: "flex",
     alignItems: "center",
-    padding: "12px 14px",
+    justifyContent: "flex-start",
+    alignSelf: "flex-start",
+    width: "max-content",
+    maxWidth: "100%",
+    flex: "0 0 auto",
+    boxSizing: "border-box",
+    gap: 8,
+    padding: "9px 12px",
     borderRadius: 10,
     background: active ? "rgba(10,132,255,0.15)" : "var(--surface)",
     border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
